@@ -6,3 +6,6 @@ plotly>=5.20,<7
 requests>=2.31,<3
 
 Pillow>=10,<13
+
+matplotlib>=3.8,<4
+reportlab>=4.0,<5

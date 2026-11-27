@@ -12,6 +12,7 @@ from hydropick.scales import PROFILES,detect_mode,automatic_mapping,physical_map
 from hydropick.visuals import PQWT_SCALE,dense_section
 from hydropick.comparison import load_image,compare
 from PIL import Image,ImageDraw
+from hydropick.reporting import interpretation_png,make_report,target_cards,SECTION,EMPTY,SCOPE
 
 st.set_page_config(page_title='HydroPick | GeoAqua',layout='wide',page_icon='💧')
 
@@ -223,7 +224,7 @@ with gp_tab:
     else: result['display_log']=result['log']
     representations['02 · Procesada experimental']=('display_log',PQWT_SCALE,False,compression)
     labels=['01 · Original','02 · Procesada experimental','03 · Contraste relativo','04 · Anomalías locales']
-    view=st.radio('Representación',['Original y procesada','Cuatro pseudosecciones','Vista individual'],horizontal=True)
+    view=st.radio('Representación',['Original y procesada','Cuatro pseudosecciones','Vista individual'],index=1,horizontal=True)
     if view=='Vista individual':
         selected=[st.selectbox('Sección',list(representations) if advanced else labels)]
     else: selected=labels[:2] if view=='Original y procesada' else labels
@@ -234,15 +235,15 @@ with gp_tab:
             title=label.replace('Procesada experimental','Procesada HydroPick')
             panel.plotly_chart(heat(result[mat],title,color,div,overlay,smooth and mat!='votes',unit,grid),use_container_width=True,key='section_'+mat)
     st.caption('Escala vertical: '+('penetración teórica' if scale_method=='Física contextualizada' and scale is not None else 'profundidad nominal' if scale is not None else 'canales PQWT')+'. Sección procesada: compresión de amplitudes HydroPick.')
+    with st.expander('Curvas y perfil por estación',expanded=True):
+        fig=go.Figure()
+        for j,c in enumerate(cols):
+            if result['valid'][j]: fig.add_trace(go.Scatter(x=x,y=result['raw'][:,j],mode='lines+markers',name=c))
+        fig.update_layout(title='Curvas originales',xaxis_title=xlabel,yaxis_title='Amplitud exportada',height=380)
+        st.plotly_chart(fig,use_container_width=True)
+        station=st.selectbox('Estación',result['stations'].tolist()); i=list(result['stations']).index(station)
+        p=go.Figure(go.Scatter(x=result['raw'][i],y=y,mode='lines+markers'));p.update_yaxes(autorange='reversed');p.update_layout(title=f'Perfil N{station}',xaxis_title='Amplitud exportada',yaxis_title=ylabel,height=400);st.plotly_chart(p,use_container_width=True)
     if advanced:
-        with st.expander('Curvas y perfil por estación'):
-            fig=go.Figure()
-            for j,c in enumerate(cols):
-                if result['valid'][j]: fig.add_trace(go.Scatter(x=x,y=result['raw'][:,j],mode='lines+markers',name=c))
-            fig.update_layout(title='Curvas originales',xaxis_title=xlabel,yaxis_title='Amplitud exportada',height=380)
-            st.plotly_chart(fig,use_container_width=True)
-            station=st.selectbox('Estación',result['stations'].tolist()); i=list(result['stations']).index(station)
-            p=go.Figure(go.Scatter(x=result['raw'][i],y=y,mode='lines+markers'));p.update_yaxes(autorange='reversed');p.update_layout(title=f'Perfil N{station}',xaxis_title='Amplitud exportada',yaxis_title=ylabel,height=400);st.plotly_chart(p,use_container_width=True)
         with st.expander('Diagnóstico técnico'):
             st.dataframe(pd.DataFrame(result['qc']),hide_index=True)
             st.dataframe(pd.DataFrame([{k:v for k,v in a.items() if k not in ('celdas','canales_detectados')} for a in result['anomalies']]),hide_index=True)
@@ -278,10 +279,13 @@ with gp_tab:
 
 decision=decide(result,scale,family,context_ok,georef,demo=demo,scale_method=scale_method,known_horizon=horizon)
 # La evidencia y la recomendación se guardan juntas. No se envían a IA sin autorización.
-payload={'version':'2.2.0','proyecto':name,'hash_csv':project_id,'linea':str(line),'modelo_equipo':model,'alcance_nominal_m':nominal,'espaciado_m':spacing if known else None,'coordenadas_referencia':{'lat':lat,'lon':lon} if georef else None,'escala':scale_meta,'comparacion_imagenes':comparison_results,'demo_csv':demo,'geologia_consulta':geo,'modelo_conceptual':family,'contexto_utilizable':context_ok,'notas_tecnico':notes,'intervalo_productivo_documentado':horizon,'fuente_intervalo':horizon_source,'qc':result['qc'],'calidad':{'cobertura':result['coverage'],'canales_informativos':result['informative'],'saltos':result['gaps']},'parametros':{'umbral':threshold,'resolucion':resolution,'compresion_visual':compression},'anomalias':result['anomalies'],'decision':decision,'alcance':'Recomendación de exploración basada en escala nominal o calibrada aportada; no confirma agua, caudal ni permisos. La ubicación es la estación del perfil, no una coordenada exacta. Los márgenes son reglas operativas no calibradas.'}
+payload={'version':'2.3.0','proyecto':name,'hash_csv':project_id,'linea':str(line),'modelo_equipo':model,'alcance_nominal_m':nominal,'espaciado_m':spacing if known else None,'coordenadas_referencia':{'lat':lat,'lon':lon} if georef else None,'escala':scale_meta,'comparacion_imagenes':comparison_results,'demo_csv':demo,'geologia_consulta':geo,'modelo_conceptual':family,'contexto_utilizable':context_ok,'notas_tecnico':notes,'intervalo_productivo_documentado':horizon,'fuente_intervalo':horizon_source,'qc':result['qc'],'calidad':{'cobertura':result['coverage'],'canales_informativos':result['informative'],'saltos':result['gaps']},'parametros':{'umbral':threshold,'resolucion':resolution,'compresion_visual':compression},'anomalias':result['anomalies'],'decision':decision,'alcance':'Recomendación de exploración basada en escala nominal o calibrada aportada; no confirma agua, caudal ni permisos. La ubicación es la estación del perfil, no una coordenada exacta. Los márgenes son reglas operativas no calibradas.'}
 fp=hashlib.sha256(json.dumps(payload,default=str,sort_keys=True).encode()).hexdigest()
 if st.session_state.get('ai_fingerprint')!=fp: st.session_state.ai_result=None;st.session_state.ai_fingerprint=fp
 ordered=sorted(decision['objetivos'],key=lambda t:(t['estado']!=DRILL,-t['indice_geofisico']))
+cards=target_cards(ordered)
+# La misma imagen PNG se muestra en Interpretación y se incorpora al PDF.
+annotated_png=interpretation_png(result,y,channel_ids,ordered,depth_axis=scale is not None and scale_method!='Física contextualizada',ylabel=ylabel,compression=compression,smooth=smooth)
 with int_tab:
     st.subheader('Resultado del estudio')
     st.markdown(f"### {decision['estado']}")
@@ -293,23 +297,20 @@ with int_tab:
     if family!='Desconocido': st.write(f'**Modelo hidrogeológico:** {family}')
     if notes: st.write(notes)
     if not context_ok: st.write('Contexto pendiente de identificación o revisión.')
-    st.divider(); st.markdown('#### B y C · Anomalías y profundidad de perforación')
-    if not ordered: st.write('No se han seleccionado puntos de perforación.')
-    priority=0
-    for t in ordered:
+    st.divider(); st.markdown('#### '+SECTION)
+    st.image(annotated_png,use_container_width=True)
+    if not cards: st.write(EMPTY)
+    for c in cards:
         with st.container(border=True):
-            if t['estado']==DRILL: priority+=1
-            st.markdown(f"**Estación N{t['estacion']} · {t['id']}**"+(f' · Prioridad {priority}' if t['estado']==DRILL else ''))
+            st.markdown('**'+c['title']+'**')
             a,b=st.columns(2)
-            interval=t['intervalo_objetivo_m'] or t['intervalo_anomalia_m']
-            a.metric('Intervalo de interés',f'{interval[0]:.0f}–{interval[1]:.0f} m' if interval else 'Por determinar')
-            b.metric('Profundidad recomendada',f"{t['profundidad_recomendada_m']} m" if t['profundidad_recomendada_m'] is not None else '—')
-            if t['distancia_m'] is not None: st.caption(f"Distancia desde el inicio: {t['distancia_m']:.1f} m")
-            st.write(f"**Decisión:** {t['estado']}"); st.write(t['motivo'])
-            if t['estado']==DRILL:
-                st.write(f"**Interpretación:** {t['hipotesis']}")
-                st.write(f"**Factor a verificar:** {t['riesgo']}")
-    st.caption('Profundidades orientativas de exploración, sujetas a comprobación durante la perforación. La recomendación no acredita caudal, calidad de agua ni autorización de captación.')
+            a.metric('Intervalo de interés',c['interval'])
+            b.metric('Profundidad recomendada',c['depth'])
+            if c['distance']: st.caption(c['distance'])
+            st.write(f"**Decisión:** {c['state']}"); st.write(c['reason'])
+            if c['hypothesis']: st.write(f"**Interpretación:** {c['hypothesis']}")
+            if c['risk']: st.write(f"**Factor a verificar:** {c['risk']}")
+    st.caption(SCOPE)
     if advanced:
         with st.expander('Análisis asistido por IA (opcional)'):
             # No usar una clave del propietario en una aplicación pública sin autenticación.
@@ -328,17 +329,6 @@ with int_tab:
                 for ref in ai['referencias']: st.write(ref.get('title','Fuente'),ref.get('url',''))
 with report_tab:
     st.subheader('Informe del estudio')
-    md=f'# HydroPick · {name}\n\nLínea: {line}\n\n## Decisión\n{decision["estado"]}\n\n{decision["motivo"]}\n\n## Contexto geológico\n{family}\n\n'+'\n'.join(descriptions)+'\n\n'+notes+'\n\n'
-    if georef: md+=f'Coordenadas de referencia: {lat}, {lon}\n\n'
-    if descriptions: md+='Fuente: IGME-CSIC GEODE 1:50.000\n\n'
-    md+='## Objetivos\n\n'
-    for t in ordered:
-        md+=f"### N{t['estacion']} · {t['id']}\n\n{t['estado']}\n\nIntervalo nominal: {t['intervalo_objetivo_m'] or t['intervalo_anomalia_m'] or 'Por determinar'}\n\nProfundidad recomendada (m): {t['profundidad_recomendada_m'] if t['profundidad_recomendada_m'] is not None else 'No asignada'}\n\n{t['motivo']}\n\n"
-        if t['estado']==DRILL: md+=f"Interpretación: {t['hipotesis']}\n\nFactor a verificar: {t['riesgo']}\n\n"
-    md+=f'## Alcance técnico\n\n{payload["alcance"]}\n\nEscala: {scale_status}\n\nPolítica de decisión: {decision["politica"]}\n'
-    st.download_button('Descargar informe técnico (.md)',md.encode('utf-8'),f'HydroPick_{project_id}_L{line}.md','text/markdown',type='primary')
-    public_fields=['id','estacion','distancia_m','intervalo_objetivo_m','intervalo_anomalia_m','profundidad_recomendada_m','estado','motivo','hipotesis','riesgo']
-    st.download_button('Descargar objetivos (.csv)',pd.DataFrame(ordered,columns=public_fields).to_csv(index=False).encode('utf-8-sig'),f'HydroPick_{project_id}_objetivos.csv','text/csv')
-    if advanced:
-        st.download_button('Descargar expediente técnico (.json)',json.dumps(dict(payload,ia=st.session_state.get('ai_result')),ensure_ascii=False,indent=2,default=str),f'HydroPick_{project_id}.json','application/json')
-        if scale is not None: st.download_button('Descargar escala aplicada (.csv)',pd.DataFrame({'canal':cols,'profundidad_m':scale}).to_csv(index=False).encode('utf-8'),f'HydroPick_{project_id}_escala.csv','text/csv')
+    st.write('Informe técnico PDF con el perfil geoeléctrico anotado y las conclusiones sobre puntos de interés y profundidad de perforación.')
+    pdf=make_report(name,line,decision,cards,annotated_png,demo=demo,coords=(lat,lon) if georef else None,scale_status=scale_status)
+    st.download_button('Descargar informe técnico (.pdf)',pdf,f'HydroPick_{project_id}_L{line}.pdf','application/pdf',type='primary')
