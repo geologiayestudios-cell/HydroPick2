@@ -23,18 +23,41 @@ RULES={
 REGIONAL={'Montes de Toledo / Valle de Alcudia':'Paleozoico: cuarcitas y pizarras; objetivos en discontinuidades, no asumir productividad de matriz.', 'Campo de Calatrava':'Entorno heterogéneo con volcanismo, sustrato paleozoico y depósitos sedimentarios; contactos y alteración pueden generar contrastes.', 'Mancha Occidental':'Sistemas carbonatados y detríticos; verificar masa de agua, niveles, continuidad y situación administrativa.', 'Campo de Montiel':'Contexto carbonatado; evaluar disolución, fracturación y conectividad.'}
 
 def query_geode(lat,lon):
-    if not (-90<=lat<=90 and -180<=lon<=180): raise ValueError('Coordenadas inválidas.')
+    """Identifica polígonos en el punto mediante la operación publicada por GEODE."""
+    if not (-90<=lat<=90 and -180<=lon<=180):
+        raise ValueError('Coordenadas inválidas.')
+    url=f'{GEODE}/identify'
+    # Extensión de contexto para la escala del mapa; no es un radio de búsqueda.
+    d=0.01
+    params={'f':'json','geometry':f'{lon},{lat}',
+            'geometryType':'esriGeometryPoint','sr':4326,
+            'layers':'all:8,6','tolerance':0,
+            'mapExtent':f'{lon-d},{lat-d},{lon+d},{lat+d}',
+            'imageDisplay':'1000,1000,96','returnGeometry':'false',
+            'returnFieldName':'true'}
     results=[]; errors=[]
-    for layer in (8,6):
-        url=f'{GEODE}/{layer}/query'
-        params={'f':'json','where':'1=1','geometry':f'{lon},{lat}','geometryType':'esriGeometryPoint','inSR':4326,'spatialRel':'esriSpatialRelIntersects','outFields':'*','returnGeometry':'false'}
-        try:
-            r=requests.get(url,params=params,timeout=18); r.raise_for_status(); data=r.json()
-            if 'error' in data: raise ValueError(str(data['error']))
-            if 'features' not in data: raise ValueError('Respuesta sin features.')
-            for f in data['features']: results.append({'capa':layer,'atributos':f.get('attributes',{}),'fuente':url,'escala':'1:50.000 peninsular'})
-        except (requests.RequestException,ValueError) as e: errors.append(f'Capa {layer}: {str(e)[:250]}')
-    return {'lat':lat,'lon':lon,'fecha_utc':datetime.now(timezone.utc).isoformat(),'registros':results,'errores':errors,'estado':'parcial' if results and errors else ('documentado' if results else ('error' if errors else 'sin coincidencias'))}
+    try:
+        r=requests.get(url,params=params,timeout=25)
+        r.raise_for_status(); data=r.json()
+        if 'error' in data: raise ValueError(str(data['error']))
+        if not isinstance(data.get('results'),list):
+            raise ValueError('Respuesta sin lista results de Identify.')
+        for item in data['results']:
+            layer=item.get('layerId')
+            if layer not in (8,6): continue
+            attrs=dict(item.get('attributes') or {})
+            aliases={'Descripción Unidad Geológica':'DESC_UNIT',
+                     'Código de Unidad Geológica':'CODE_UNIO',
+                     'Edad Superior':'NAME_EDA2','Edad Inferior':'NAME_EDA1'}
+            for alias,key in aliases.items():
+                if key not in attrs and alias in attrs: attrs[key]=attrs[alias]
+            if not attrs.get('DESC_UNIT') and item.get('displayFieldName') in ('DESC_UNIT','Descripción Unidad Geológica'):
+                attrs['DESC_UNIT']=item.get('value')
+            results.append({'capa':layer,'atributos':attrs,'fuente':url,'escala':'1:50.000 peninsular'})
+    except (requests.RequestException,ValueError) as e:
+        errors.append(f'GEODE Identify: {str(e)[:350]}')
+    return {'lat':lat,'lon':lon,'fecha_utc':datetime.now(timezone.utc).isoformat(),
+            'registros':results,'errores':errors,'estado':'parcial' if results and errors else ('documentado' if results else ('error' if errors else 'sin coincidencias'))}
 
 def suggest_family(records):
     text=' '.join(str(r.get('atributos',{}).get('DESC_UNIT','')) for r in records).lower(); text=''.join(c for c in unicodedata.normalize('NFD',text) if unicodedata.category(c)!='Mn')
