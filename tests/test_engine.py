@@ -23,8 +23,9 @@ def test_synthetic():
     assert depths[-1]==80 and all(x.get('intervalo_nominal_m') for x in a['anomalies'])
 
 def test_query_mock():
-    r=Mock();r.json.return_value={'features':[{'attributes':{'DESC_UNIT':'Calizas'}}]}
-    with patch('hydropick.geology.requests.get',return_value=r):
+    r=Mock();r.json.return_value={'results':[{'layerId':8,'attributes':{'DESC_UNIT':'Calizas'}},{'layerId':6,'attributes':{'DESC_UNIT':'Calizas'}}]}
+    with patch('hydropick.geology.requests.get',return_value=r) as get:
         a=query_geode(39,-4);assert a['estado']=='documentado' and len(a['registros'])==2
+        assert get.call_args.args[0].endswith('/identify') and get.call_args.kwargs['params']['layers']=='all:8,6'
     assert suggest_family(a['registros'])=='Carbonatado / kárstico'
     assert interpret([{'id':'A1','estacion':3,'indice_geofisico':90,'borde':True}],'Carbonatado / kárstico',True)[0]['accion'].startswith('Ampliar')

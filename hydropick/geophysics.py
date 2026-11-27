@@ -38,7 +38,9 @@ def analyze(df,cols,spacing=None,resolution=0.001,threshold=1.5):
     if len(n)<5: raise ValueError('Se requieren al menos cinco estaciones para contraste local.')
     if resolution<=0 or threshold<=0: raise ValueError('Resolución y umbral deben ser positivos.')
     x=(n-n[0])*(spacing if spacing else 1.)
-    valid=np.zeros(len(cols),bool); qc=[]; z=np.full_like(v,np.nan); local=z.copy(); trend=z.copy()
+    valid=np.zeros(len(cols),bool); qc=[]; z=np.full_like(v,np.nan); local=z.copy(); trend=z.copy(); log_z=z.copy(); relative=z.copy()
+    # Compresión monotónica, conserva signo si el instrumento exporta valores negativos.
+    log=np.sign(v)*np.log1p(np.abs(v))/np.log(10.)
     for j,c in enumerate(cols):
         y=v[:,j]; ok=np.isfinite(y); a=y[ok]; status='válido'
         if len(a)==0: status='sin datos'
@@ -50,6 +52,10 @@ def analyze(df,cols,spacing=None,resolution=0.001,threshold=1.5):
         if not valid[j]: continue
         med=np.median(a); scale=max(1.4826*np.median(np.abs(a-med)),resolution)
         z[ok,j]=(a-med)/scale
+        if abs(med)>=resolution: relative[ok,j]=(a-med)/abs(med)
+        b=log[ok,j]; bm=np.median(b)
+        log_floor=np.log1p(resolution/(1+abs(med)))/np.log(10.)
+        log_z[ok,j]=(b-bm)/max(1.4826*np.median(np.abs(b-bm)),log_floor)
         slope,intercept,*_=theilslopes(a,x[ok]); residual=a-(slope*x[ok]+intercept)
         ts=max(1.4826*np.median(np.abs(residual-np.median(residual))),resolution)
         trend[ok,j]=(residual-np.median(residual))/ts
@@ -60,20 +66,25 @@ def analyze(df,cols,spacing=None,resolution=0.001,threshold=1.5):
                 local[i,j]=(y[i]-b)/scale
     # Malla de canales físicos numerados; no unir canales con identificadores discontinuos.
     ids=np.array([int(re.search(r'\d+',c).group()) for c in cols]); consecutive=np.all(np.diff(ids)==1)
-    masks=[]
-    for t in (threshold*.8,threshold,threshold*1.2):
-        for base in (trend,z): masks.append(np.isfinite(base)&(base<=-t))
-        # Contraste local más sensible; necesita apoyo multicanal posterior.
-        masks.append(np.isfinite(local)&(local<=-t*.5))
-    votes=np.sum(masks,axis=0); candidates=votes>=2
-    # Evitar conexiones artificiales a través de estaciones/canales omitidos.
-    if consecutive and np.all(np.diff(n)==1): regions,count=label(candidates)
-    else:
-        regions=np.zeros_like(v,dtype=int); count=0
-        for i in range(len(n)):
-            js=np.flatnonzero(candidates[i]); groups=np.split(js,np.where(np.diff(ids[js])!=1)[0]+1) if len(js) else []
-            for group in groups:
-                count+=1; regions[i,group]=count
+    # Tres familias: amplitud global (original/relativa y log, una sola familia),
+    # tendencia y contraste local. No contabilizar umbrales como métodos independientes.
+    def family_masks(t):
+        global_raw=np.isfinite(z)&(z<=-t)
+        global_log=np.isfinite(log_z)&(log_z<=-t)
+        return {'global':global_raw|global_log,'tendencia':np.isfinite(trend)&(trend<=-t),
+                'local':np.isfinite(local)&(local<=-t*.5)}
+    families=family_masks(threshold)
+    methods={'Original / contraste robusto':np.isfinite(z)&(z<=-threshold),
+             'Compresión logarítmica':np.isfinite(log_z)&(log_z<=-threshold),
+             'Contraste por canal':np.isfinite(z)&(z<=-threshold),
+             'Residual de tendencia':families['tendencia'],'Contraste local':families['local']}
+    votes=np.sum(list(families.values()),axis=0); candidates=votes>=2
+    stability=np.mean([np.sum(list(family_masks(t).values()),axis=0)>=2 for t in (threshold*.8,threshold,threshold*1.2)],axis=0)
+    # Etiquetar por bloques contiguos sin unir saltos de estación o canal.
+    regions=np.zeros_like(v,dtype=int); count=0
+    for ir in np.split(np.arange(len(n)),np.flatnonzero(np.diff(n)!=1)+1):
+        for jr in np.split(np.arange(len(ids)),np.flatnonzero(np.diff(ids)!=1)+1):
+            ix=np.ix_(ir,jr); block,num=label(candidates[ix]); regions[ix]=np.where(block,block+count,0); count+=num
     anomalies=[]
     for r in range(1,count+1):
         ii,jj=np.where(regions==r)
@@ -81,13 +92,15 @@ def analyze(df,cols,spacing=None,resolution=0.001,threshold=1.5):
         strengths=np.maximum(0,-np.nan_to_num(trend[ii,jj],nan=0)); local_strength=np.maximum(0,-np.nan_to_num(local[ii,jj],nan=0)); raw_strength=np.maximum(0,-np.nan_to_num(z[ii,jj],nan=0))
         signal=np.maximum.reduce([strengths,local_strength,raw_strength]); station_scores={int(i):float(np.sum(signal[ii==i])) for i in np.unique(ii)}
         center=max(station_scores,key=station_scores.get); edge=bool(0 in ii or len(n)-1 in ii)
-        support=float(np.mean(votes[ii,jj])/len(masks)); contrast=float(np.median(signal))
+        support=float(np.mean(votes[ii,jj])/len(families)); contrast=float(np.median(signal))
+        method_support={k:round(float(np.mean(m[ii,jj]))*100,1) for k,m in methods.items()}
+        stability_pct=round(float(np.mean(stability[ii,jj]))*100,1)
         # Índice experimental de contraste/soporte, no probabilidad; borde penalizado.
         score=100*(.50*min(contrast/3,1)+.30*support+.20*min(len(np.unique(jj))/8,1))*(.7 if edge else 1)
-        anomalies.append({'estacion':int(n[center]),'estacion_inicio':int(n[ii.min()]),'estacion_fin':int(n[ii.max()]),'distancia':float(x[center]),'canal_inicio':cols[jj.min()],'canal_fin':cols[jj.max()],'canales_detectados':[cols[j] for j in sorted(set(jj))],'n_canales':int(len(np.unique(jj))),'n_estaciones':int(len(np.unique(ii))),'borde':edge,'contraste':round(contrast,2),'apoyo_metodos_pct':round(support*100,1),'indice_geofisico':round(score,1),'patron':'borde abierto' if edge else ('localizado' if len(np.unique(ii))<=2 else 'extenso'),'celdas':[[int(i),int(j)] for i,j in zip(ii,jj)]})
+        anomalies.append({'estacion':int(n[center]),'estacion_inicio':int(n[ii.min()]),'estacion_fin':int(n[ii.max()]),'distancia':float(x[center]),'canal_inicio':cols[jj.min()],'canal_fin':cols[jj.max()],'canales_detectados':[cols[j] for j in sorted(set(jj))],'n_canales':int(len(np.unique(jj))),'n_estaciones':int(len(np.unique(ii))),'borde':edge,'contraste':round(contrast,2),'apoyo_metodos_pct':round(support*100,1),'persistencia_umbral_pct':stability_pct,'consenso_por_metodo_pct':method_support,'indice_geofisico':round(score,1),'patron':'borde abierto' if edge else ('localizado' if len(np.unique(ii))<=2 else 'extenso'),'celdas':[[int(i),int(j)] for i,j in zip(ii,jj)]})
     anomalies.sort(key=lambda a:-a['indice_geofisico'])
     for i,a in enumerate(anomalies,1): a['id']=f'A{i:02d}'
-    return {'stations':n,'x':x,'raw':v,'z':z,'trend':trend,'local':local,'votes':votes,'valid':valid,'qc':qc,'anomalies':anomalies,'coverage':float(np.isfinite(v).mean()),'informative':float(valid.mean()),'gaps':bool(np.any(np.diff(n)!=1) or not consecutive),'spacing_known':spacing is not None}
+    return {'stations':n,'x':x,'raw':v,'z':z,'log':log,'log_z':log_z,'relative':relative,'trend':trend,'local':local,'votes':votes,'stability':stability,'valid':valid,'qc':qc,'anomalies':anomalies,'coverage':float(np.isfinite(v).mean()),'informative':float(valid.mean()),'gaps':bool(np.any(np.diff(n)!=1) or not consecutive),'spacing_known':spacing is not None}
 
 
 def depth_intervals(anomalies,mapping,cols,nominal):
