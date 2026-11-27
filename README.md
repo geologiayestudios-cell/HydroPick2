@@ -1,75 +1,62 @@
-# HydroPick V2.1 — España · Piloto Ciudad Real
+# HydroPick · España — V2.2.0
 
-Versión 2.1.0 de GeoAqua. Conserva el conector GEODE `Identify` que funcionó en V2.0.1. Incorpora escalas automáticas, cuatro pseudosecciones, detección por consenso y comparación experimental con las imágenes del fabricante. No es una inversión geoeléctrica ni un predictor calibrado de productividad.
+Primera edición pública propuesta. Motor PQWT y contexto GEODE (IGME-CSIC). Especial interés en Ciudad Real. La aplicación calcula una recomendación de **perforación exploratoria**, no un rendimiento garantizado ni una autorización de captación.
 
-## Actualizar la aplicación que ya está publicada
+## Despliegue
 
-1. Haz una copia de la rama existente o crea una rama `v2.1` en GitHub para probar antes de actualizar producción.
-2. Descomprime el ZIP. Copia **el contenido** de `HydroPick_V2_1_ES/` en la raíz del repositorio (no anides esa carpeta dentro del repositorio). Reemplaza `app.py`, `requirements.txt`, `README.md` y los archivos de `hydropick/`. Añade `examples/` y `tests/`. La versión de `hydropick/geology.py` incluida es exactamente el parche IGME anterior.
-3. Mantén tus Secrets de Streamlit y la configuración de acceso existente. No subas `.streamlit/secrets.toml`, claves ni `config.yaml` de V1. Las carpetas ocultas incluidas solo contienen configuración pública y una plantilla.
-4. Confirma los cambios. Streamlit normalmente redespliega automáticamente; si es necesario usa **Manage app → Reboot app**. El archivo principal sigue siendo `app.py`. Python 3.11/3.12 recomendado. Se añade Pillow en `requirements.txt` para tratar imágenes.
-5. Comprueba la consulta IGME con las mismas coordenadas que ya funcionaron. Luego prueba el ejemplo L171 y sus imágenes.
+- Mantén una copia del repositorio y de tus Secrets anteriores.
+- Copia los contenidos de esta carpeta a la raíz del repositorio GitHub (incluidas carpetas ocultas). `app.py` es el punto de entrada. Mantén `requirements.txt`.
+- Si reutilizas el repositorio anterior, **elimina explícitamente** los CSV e imágenes reales de `examples/` y conserva solo `Demo_150m.csv`. Para una publicación abierta recomendamos un repositorio nuevo sin el historial privado ni credenciales anteriores. No publiques `config.yaml` de V1 ni `.streamlit/secrets.toml`. Revisa datos y permisos del repositorio.
+- Para una app pública, elimina `APP_PASSWORD` de Secrets o establece `APP_PASSWORD = ""`. Si mantienes una contraseña, se conserva el acceso restringido. En modo público el código no usa la clave OpenAI del propietario; el usuario puede usar su propia clave en Modo técnico. `OPENAI_MODEL` es opcional y configurable.
+- En Streamlit Community Cloud selecciona el repositorio, rama y `app.py`; Python 3.11/3.12. Reinicia. No se necesita API key del IGME. Antes de abrir el servicio al público comprueba condiciones de uso/atribución GEODE, privacidad y política de uso de la app; las condiciones de reutilización comercial no se han validado en esta entrega.
 
-No se requiere una nueva API key para IGME ni para las mejoras del motor numérico. La IA opcional conserva la configuración previa (`APP_PASSWORD`, `OPENAI_API_KEY`, `OPENAI_MODEL`); su facturación es independiente de ChatGPT. El acceso por contraseña del prototipo no sustituye controles de acceso robustos ni limita intentos. Usa un repositorio privado y evita publicar información de clientes sin autorización.
+Local: `pip install -r requirements.txt` y `streamlit run app.py`.
 
-## Escala de profundidad
+## Flujo de uso
 
-El selector detecta el modo compatible por número y secuencia de canales. La escala automática utiliza `z=(i−1)*D/(N−1)`, de cero al alcance nominal. No se renumeran canales omitidos ni se inventan frecuencias.
+1. Carga CSV, introduce coordenadas WGS84 reales (sin valores por defecto), confirma alcance del equipo y, si lo conoces, espaciamiento entre estaciones. El número de estación se conserva tal como figura en el archivo.
+2. Pulsa Consultar geología IGME. Se muestra la descripción de las unidades cartografiadas y se sugiere el modelo hidrogeológico por reglas léxicas. Si el contexto requiere ajuste, activa información propia, elige modelo y confirma una fuente local. La cartografía superficial no verifica la columna a profundidad.
+3. Revisa la geofísica: original y procesada por defecto; cuatro secciones o vista individual disponibles. La transformación procesada es propia de HydroPick. La escala automática es lineal nominal de 0 a Dmax en N−1 intervalos, no una calibración física. La de 300 m se contrastó gráficamente con L171; 100/150/500 m siguen siendo provisionales. El modo técnico admite escalas personalizadas y físicas, aunque estas últimas no sustentan una profundidad de perforación por sí solas.
+4. En Interpretación verás decisión, contexto, estaciones, intervalos y profundidades recomendadas. Si hay antecedentes productivos comparables, introduce su intervalo de profundidad y referencia. No introducir datos inventados o no comparables.
+5. Descarga la nota técnica y los objetivos CSV. El Modo técnico añade diagnósticos, curvas, perfil, comparación con imágenes, escala y JSON trazable, así como análisis complementario opcional por IA.
 
-| Modo | Canales | Intervalo nominal | Estado |
-|---|---:|---:|---|
-| 100 m | 20 | 5.263 m | Provisional |
-| 150 m | 36 | 4.286 m | Provisional |
-| 300 m | 40 | 7.692 m | Contrastada gráficamente en L171 |
-| 500 m | 49 | 10.417 m | Extrapolada, sin gráfica de referencia |
+El modo demostración solo contiene mediciones sintéticas, sin coordenadas ni recomendaciones reales. Los CSV no se envían a IGME ni OpenAI; IGME recibe las coordenadas al consultar. El modo IA envía el paquete de metadatos, notas, resultados derivados y coordenadas únicamente tras autorización; no se envían las imágenes. No hay almacenamiento persistente propio en la aplicación; el servicio de alojamiento puede tener sus propias políticas y registros. No subir información confidencial sin autorización. Las API y el alojamiento no han sido probados en vivo en esta entrega.
 
-Si el CSV no coincide con el modo, la escala automática se rechaza y las salidas quedan en canales. El selector también permite:
-- **Personalizada / calibrada:** CSV `canal,profundidad_m`, todos los canales, referencia obligatoria. Monótona, dentro del alcance seleccionado.
-- **Física contextualizada:** CSV `canal,frecuencia_hz` documentado, resistividad asumida y factor k (0.3–0.5). Calcula `k*503.3*sqrt(rho/f)`. Si excede el alcance, no lo recorta ni reescala; el usuario debe revisar supuestos. Es una escala de penetración teórica, no profundidad del cuerpo.
-- **Solo canales:** análisis sin convertir el eje vertical.
+## Motor de decisión — política public-1.0
 
-La escala aplicada puede descargarse en la pestaña Exportar. Los canales constantes se excluyen del detector pero no se eliminan de la escala original. Las profundidades son nominales o teóricas, no intervalos verificados por perforación.
+Módulo `hydropick/decision.py`. Reglas deterministas: el modelo de IA no puede modificar el resultado calculado de la app.
 
-## Pseudosecciones y consenso
+### Criterios de entrada
 
-En Geofísica, la vista predeterminada muestra simultáneamente cuatro representaciones:
-1. Original: amplitudes exportadas, paleta aproximada PQWT.
-2. Procesada experimental: por defecto `sign(V)*log10(1+abs(V))`; opciones `log10(V)` (solo valores positivos) y raíz cuadrada con signo. No se afirma reproducir exactamente el algoritmo propietario PQWT.
-3. Contraste relativo: puntuación robusta por canal (mediana/MAD y límite mínimo de resolución).
-4. Anomalías locales: residual respecto a vecinos inmediatos, normalizado por la dispersión robusta del canal.
+- Mínimo 5 estaciones; cobertura numérica ≥80%; proporción de canales informativos ≥35%, al menos 3 informativos. No se permiten saltos de estaciones/canales para recomendar perforación.
+- Detector de V2.1: 2 de 3 familias de contraste, 3 canales por región. Umbral robusto inicial 1.5; resolución de amplitud 0.001.
+- Para recomendar: anomalía interior, índice geofísico ≥60/100, persistencia ≥65%, y al menos 3 canales consecutivos respaldados en la estación seleccionada. Estos índices son heurísticos, no probabilidades.
+- Ubicación real y modelo local identificable por GEODE o modelo aportado y confirmado por el usuario con fuente. En medios arcillosos/margosos o mixtos se exige antecedente productivo independiente comparable. Si se aporta intervalo, se exigen al menos dos canales de soporte dentro del mismo; la estimación se restringe a ese soporte.
+- Escala nominal automática compatible o personalizada; sin escala, o escala de penetración teórica exclusivamente, no se emite profundidad de perforación.
 
-La vista individual incluye también residual de tendencia, contraste fraccional y mapa de consenso. La interpolación lineal y los contornos son opcionales y se emplean únicamente para visualizar; no extrapolan ni rellenan huecos entre estaciones/canales faltantes. Curvas originales, perfiles verticales y QA/QC se conservan.
+### Cálculo de profundidad
 
-El detector trabaja en la matriz medida, no en píxeles. Exige coincidencia de dos de tres familias por celda: contraste global (original y log agrupados para evitar duplicar evidencias), residual de tendencia, contraste local. Exige al menos tres canales por región conectada. El índice de contraste y persistencia es experimental; puede cambiar la jerarquización respecto a V2.0 y puede no identificar candidatos. Se penalizan bordes abiertos. La estabilidad se evalúa con umbrales 0.8×, 1× y 1.2×. Todas las transformaciones derivan de la misma adquisición; no representan corroboración de campo independiente.
+1. Selecciona en la estación central el tramo consecutivo de canales con mayor suma de votos, después longitud y menor profundidad para desempatar. Obtiene techo y base z_sup y z_inf en la escala seleccionada.
+2. Si hay horizonte productivo comparable documentado, restringe al tramo de soporte dentro de ese horizonte. No extrapola una unidad superficial ni inventa estratigrafía.
+3. Margen exploratorio M = max(mínimo litológico, paso nominal hasta el canal útil siguiente, fracción × (z_inf − z_sup)). Los mínimos y fracciones son parámetros operativos iniciales no calibrados:
 
-## Comparación con gráficas del fabricante
+| Familia | Mínimo (m) | Fracción |
+|---|---:|---:|
+| Detrítico granular | 5 | 0.25 |
+| Carbonatado/kárstico | 10 | 0.35 |
+| Paleozoico cuarcita-pizarra | 10 | 0.50 |
+| Volcánico | 10 | 0.50 |
+| Granítico/cristalino | 10 | 0.50 |
+| Arcilloso/margoso con antecedente | 5 | 0.25 |
+| Mixto con antecedente | 10 | 0.50 |
 
-En Geofísica, abrir **Comparar con gráficas PQWT del fabricante (experimental)**. Subir una o ambas imágenes PNG/JPEG de la misma línea y alcance. Ajustar los límites en píxeles del área de datos (sin ejes o leyenda) y la posición de la barra cromática vertical (alto arriba/bajo abajo), junto con el número de clases. La previsualización marca los límites. Seleccionar la casilla de comparación de cada imagen.
+4. D_rec = 5 × ceil((z_inf + M)/5). Redondeo ascendente a 5 m para planificación. El resultado se limita a la cobertura consecutiva de canales informativos medidos en esa estación **por debajo del objetivo**. Si no hay cobertura suficiente, se requiere ampliar el alcance; no se recorta el objetivo para emitir un número artificial.
+5. Un plan de perforación por estación: mayor índice geofísico entre candidatos admisibles, en empate menor profundidad. Los horizontes secundarios permanecen en la salida. La prioridad entre estaciones admisibles utiliza el índice geofísico, tras los filtros geológicos y de calidad.
 
-Para probar sin subir archivos: activar ejemplo `300M_L171.csv`, mantener escala automática de 300 m y activar **Usar las dos imágenes de ejemplo L171**. Los recortes iniciales están ajustados aproximadamente a estas imágenes; en otras imágenes se deben revisar. La comparación necesita un eje que cubra 0 a D y presupone un eje horizontal lineal con el mismo orden de estaciones. Se realiza interpolación lineal visual, muestreo de leyenda y asignación aproximada de clases cromáticas; se excluyen píxeles alejados de la paleta. Se calculan Pearson, Spearman y cobertura por método. Los métodos pueden tener distinta cobertura; comparar con cautela. No son amplitudes físicas recuperadas, una inversión ni una prueba del algoritmo propietario. Los resultados no alteran el detector. Las imágenes no se envían a la IA; las métricas se incorporan al paquete que puede enviarse con consentimiento.
+Estados: Perforación exploratoria recomendada; Repetir o ampliar mediciones; Completar información; No recomendar perforación. Un perfil sin candidatos suficientes no equivale a ausencia de agua. Se mantiene una parada técnica al alcanzar el horizonte y la verificación de calidad y caudal en campo. La app no evalúa concesiones, permisos, coste ni diseño definitivo. Para Ciudad Real deben comprobarse restricciones de la demarcación y masa de agua antes de ejecutar.
 
-## Geología y exportación
+## Validación
 
-GEODE IGME-CSIC: https://mapas.igme.es/gis/rest/services/Cartografia_Geologica/IGME_Geode_50/MapServer — `Identify`, capas 8 y 6, escala peninsular 1:50.000. La aplicación conserva consulta, atributos, errores y validación manual del modelo geológico. Se mantienen las referencias MAGNA, CH Guadiana e IGME, las reglas expertas, los contextos regionales de Ciudad Real y la IA opcional. La cartografía superficial no determina la litología a profundidad. Revisar condiciones del servicio antes de uso comercial. Los ejemplos no corresponden automáticamente a las coordenadas del proyecto.
+`python -m pip install pytest` y `python -m pytest -q`.
 
-Exportar JSON (incluye escala, parámetros, comparación y métricas), CSV de candidatos, CSV de escala y nota Markdown. No existe almacenamiento persistente en esta versión; descargar los resultados antes de cerrar la sesión.
-
-## Ejecutar localmente y verificar
-
-```sh
-python -m venv .venv
-# Activa .venv según tu sistema
-python -m pip install -r requirements.txt
-python -m pip install pytest
-python -m pytest -q
-python -m compileall -q app.py hydropick
-streamlit run app.py
-```
-
-15 pruebas automatizadas superadas en el entorno de desarrollo: importación de los cuatro CSV reales; canales constantes; anomalía sintética; cuatro escalas; modelo físico; respeto de huecos y orientación descendente; comparación con las dos imágenes reales de L171; consulta Identify simulada. La compilación Python pasó. No se ha ejecutado la interfaz real de Streamlit (dependencia no instalada en el entorno de desarrollo), ni se ha realizado una nueva consulta en vivo a IGME ni a OpenAI. El conector se conserva idéntico al parche que el usuario confirmó que funcionaba.
-
-Con resolución 0.001 y umbral 1.5: L67 genera 5 regiones, L171 1, L1 1 y L15 ninguna. No equivale a éxito/fracaso de perforación. Con la configuración inicial de recorte cromático L171, Pearson es aproximadamente 0.975 para original vs datos brutos y 0.969 para procesada vs log10 positivo, frente a 0.787 para procesada vs datos brutos. Son cifras dependientes del procedimiento de comparación.
-
-## Archivos
-
-`app.py` interfaz; `hydropick/geophysics.py` análisis y consenso; `hydropick/scales.py` escalas; `hydropick/visuals.py` interpolación; `hydropick/comparison.py` comparación cromática; `hydropick/geology.py` conector IGME y reglas; `hydropick/ai.py` integración opcional; `examples/` cuatro CSV y dos imágenes L171; `tests/` pruebas. No incluye contraseñas ni claves reales.
+La entrega excluye los ejemplos reales para no publicar datos aportados por el usuario. Las pruebas de regresión privadas se habilitan con `HYDROPICK_PRIVATE_FIXTURES` apuntando a la carpeta `examples/` de V2.1. Se probaron los cuatro CSV anteriores y ambas imágenes de L171; 27 pruebas pasaron con las fixtures originales, incluidas 12 pruebas adicionales de la política de decisión. Sin ellas se omiten seis pruebas de regresión privadas. El código compiló correctamente. No se ejecutó Streamlit ni una consulta externa en vivo en este entorno. La política aún requiere validación con pozos reales (incluidos improductivos).

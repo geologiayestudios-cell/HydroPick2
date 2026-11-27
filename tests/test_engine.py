@@ -1,4 +1,5 @@
 from pathlib import Path
+import os,pytest
 from unittest.mock import patch,Mock
 import numpy as np
 import pandas as pd
@@ -6,7 +7,9 @@ from hydropick.geophysics import read_pqwt,analyze,depth_intervals
 from hydropick.geology import query_geode,suggest_family,interpret
 
 def test_l67():
-    df,cols=read_pqwt((Path(__file__).parents[1]/'examples/150M_L67.csv').read_bytes())
+    p=Path(os.environ.get('HYDROPICK_PRIVATE_FIXTURES',Path(__file__).parents[1]/'examples'))/'150M_L67.csv'
+    if not p.exists(): pytest.skip('Fixture privada no distribuida')
+    df,cols=read_pqwt(p.read_bytes())
     a=analyze(df,cols)
     assert len(cols)==36 and len(df)==11 and (a['raw']==0).sum()==149
     assert not a['valid'][:12].any() and a['valid'][12:].all()

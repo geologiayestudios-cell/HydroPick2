@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 import numpy as np
 import pandas as pd
 import pytest
@@ -7,7 +8,7 @@ from hydropick.scales import automatic_mapping,detect_mode,physical_mapping,PROF
 from hydropick.visuals import dense_section
 from hydropick.comparison import load_image,compare
 
-EXAMPLES=Path(__file__).parents[1]/'examples'
+EXAMPLES=Path(os.environ.get('HYDROPICK_PRIVATE_FIXTURES',Path(__file__).parents[1]/'examples'))
 @pytest.mark.parametrize('mode,n',PROFILES.items())
 def test_scale(mode,n):
     cols=[f'freq{i:02}' for i in range(1,n+1)]
@@ -29,6 +30,7 @@ def test_physical():
 
 @pytest.mark.parametrize('file,mode',[('100M_L15.csv',100),('150M_L1.csv',150),('150M_L67.csv',150),('300M_L171.csv',300)])
 def test_real_examples(file,mode):
+    if not (EXAMPLES/file).exists(): pytest.skip('Fixture privada no distribuida')
     df,c=read_pqwt((EXAMPLES/file).read_bytes());a=analyze(df,c)
     assert detect_mode(c)==mode and np.array_equal(a['raw'],df.sort_values('N')[c].to_numpy(),equal_nan=True)
     assert np.allclose(a['log'],np.sign(a['raw'])*np.log10(1+np.abs(a['raw'])),equal_nan=True)
@@ -49,6 +51,7 @@ def test_gaps_and_descending():
     assert np.allclose(z,z2,equal_nan=True)
 
 def test_images():
+    if not (EXAMPLES/'300M_L171.csv').exists(): pytest.skip('Fixtures privadas no distribuidas')
     df,c=read_pqwt((EXAMPLES/'300M_L171.csv').read_bytes());a=analyze(df,c); y=automatic_mapping(c,300)[0].profundidad_m.to_numpy();x=a['stations']
     matrices={'raw':a['raw'],'log1p':a['log'],'log10':np.log10(a['raw'])}
     metrics=[]
